@@ -1,231 +1,253 @@
-# DeadZone v3.1 — Installation and User Guide
+DeadZone
+Use the working part of a damaged laptop display as your Windows desktop.
 
-DeadZone is a Windows desktop-mirroring utility for a laptop panel with a damaged strip on the left. It uses a **Virtual Display Driver (VDD)** monitor as the Windows primary desktop, then mirrors that virtual desktop onto the working portion of the laptop's physical LCD. The damaged strip is covered in black.
+DeadZone is an experimental Windows utility for laptops whose LCD panel has a physically damaged strip along one side. It uses a virtual monitor as the Windows desktop and mirrors that virtual monitor onto the working portion of the laptop's physical panel.
+[!IMPORTANT]
+DeadZone is experimental. The supplied C# source and batch files have not been verified on a real Windows laptop as part of this README preparation. The lock-screen helper and display-mirroring path in particular need real-hardware testing. Back up important data and make sure you have a recovery route before installing a display driver or the Windows service.
 
-> **Important:** DeadZone is not a hardware repair and does not change the physical panel's native resolution. Windows uses two displays: the VDD virtual display as the main desktop, and the laptop LCD as the output panel. DeadZone copies the virtual desktop to the usable section of the LCD. The VDD monitor must be configured to the exact working-area resolution before mirroring can start.
+Contents
+- How DeadZone works
+- Requirements
+- Project files
+- Installation
+- First-time setup
+- Using DeadZone
+- Lock-screen helper service
+- Performance and limitations
+- Troubleshooting
+- Updating DeadZone
+- Uninstalling
+- How configuration is stored
+- Credits and related projects
+How DeadZone works
+A normal Windows application cannot redefine the physical dimensions of a laptop's built-in LCD panel. A conventional custom resolution also does not reliably make Windows place the desktop only on the undamaged portion of that panel.
 
-## 1. What DeadZone does
+DeadZone takes a different approach:
+1. Choose the damaged strip. On first launch, a full-screen setup grid appears. Drag the cyan vertical line to the point where the usable part of the LCD begins.
+2. Create a virtual monitor. A separate virtual display is configured to the usable width and the panel's full height.
+3. Make the virtual monitor the Windows primary display. Windows renders the desktop, taskbar, application windows and normal full-screen content on this smaller virtual monitor.
+4. Mirror it to the laptop panel. DeadZone captures frames from the virtual monitor using the Windows Desktop Duplication API and Direct3D 11. It presents those frames on the laptop panel, offset to the right of the damaged strip.
+5. Keep input on the virtual monitor. DeadZone clips the mouse to the virtual display. The mirror draws the virtual display's mouse cursor on the physical panel.
+6. Move misplaced application windows. A lightweight window check runs every 300 ms and attempts to move visible top-level application windows that open on the original laptop panel onto the virtual display.
+For example, with a physical panel of 1920 x 1080 and a left-side damaged strip of 576 pixels, the virtual display must be configured to:
+1920 - 576 = 1344 pixels wide
+1080 pixels high
 
-- Displays a full-screen setup grid so you can drag a vertical line to the boundary between the damaged and working areas.
-- Saves the cut width and the original panel dimensions in `%APPDATA%\DeadZone\config.txt`.
-- Expects a VDD virtual monitor with these dimensions:
-
-  `virtual width = physical panel width - damaged-left width`
-
-  `virtual height = physical panel height`
-
-- Requires the VDD monitor to be the Windows **main display** so the Start menu, taskbar and newly opened applications use the virtual desktop.
-- Captures the VDD desktop and mirrors it onto the working section of the laptop LCD; the left cut-out section is filled with black.
-- Clips the mouse to the virtual desktop while mirroring is active.
-- Attempts to move ordinary/borderless full-screen windows that open over the physical laptop panel onto the virtual display.
-- Provides a tray menu, startup option, cursor option, re-adjustment command and emergency exit hotkey.
-
-## 2. What it does not do
-
-- It does not make Windows report the laptop's physical LCD as a smaller, single physical monitor. Windows sees a separate virtual monitor and a physical monitor.
-- It cannot reliably redirect exclusive-fullscreen games or applications that take direct control of the display. Set those applications to **Borderless Windowed** or **Windowed Fullscreen**.
-- It cannot mirror the Windows lock screen or sign-in screen. Those run on a protected desktop unavailable to a normal user-mode application.
-- It does not guarantee support for every GPU, graphics driver, multi-monitor layout or display-capture configuration. Test it on the target laptop before relying on it.
-
-## 3. Requirements
-
+Required virtual resolution: 1344 x 1080
+DeadZone does not alter the LCD hardware or change the physical monitor's EDID. Windows uses the virtual monitor as the desktop display; the original laptop panel remains connected as the surface onto which DeadZone mirrors the picture.
+Requirements
 - Windows 10 or Windows 11.
-- The DeadZone v3.1 source package fully extracted to a writable local folder. Do not run `build.bat` from inside the ZIP archive.
-- A working Virtual Display Driver (VDD) virtual monitor.
-- Permission to install a display driver and change display settings.
-- A compatible GPU/driver that supports the DXGI Desktop Duplication and Direct3D 11 operations used by DeadZone.
-- Internet access for the first .NET SDK publish/build if the Windows .NET Framework compiler is unavailable.
+- A Direct3D 11-compatible graphics device and a working graphics driver.
+- The Virtual Display Driver (VDD).
+- The separate Virtual Driver Control application to manage virtual displays and their resolutions.
+- The latest supported Microsoft Visual C++ Redistributable, required by the Virtual Display Driver. Install it if the driver reports a missing vcruntime140.dll dependency.
+- The Windows .NET Framework C# compiler used by build.bat (csc.exe, normally found under %WINDIR%\Microsoft.NET\Framework64\v4.0.30319\ or %WINDIR%\Microsoft.NET\Framework\v4.0.30319\).
+- Administrator permission to install the virtual display driver and the optional DeadZone Windows service.
+Display setup assumptions: DeadZone is designed for one damaged laptop panel plus one virtual display. On first launch it measures the current primary display. Set the laptop panel as the primary display before running DeadZone for the first time. Disconnect or temporarily disable unrelated external monitors during initial configuration if possible, especially monitors that use the same resolution as either DeadZone display.
+Project files
+Place these files together in one folder. The names matter because the batch files refer to them directly.
+DeadZone/
+├── DeadZone.cs
+├── build.bat
+├── install_service.bat
+├── uninstall_service.bat
+└── README.md
+If you downloaded the source files with browser-added suffixes, rename them before building:
+- DeadZone(2).cs → DeadZone.cs
+- build(3).bat → build.bat
+Keep install_service.bat and uninstall_service.bat with those exact names. The build script expects DeadZone.cs in the same folder. The service installer expects DeadZone.exe in that same folder.
+Installation
+1. Download the DeadZone files
+Download or clone this repository. Extract all project files into a permanent folder. For example:
+C:\DeadZone
+Do not put the project in a temporary Downloads extraction folder if you plan to install the lock-screen service. The service stores the executable's path and expects it to remain there.
+2. Build DeadZone.exe
+1. Open C:\DeadZone in File Explorer.
+2. Click the address bar, type cmd, and press Enter. This opens Command Prompt in the project folder.
+3. Run:
+build.bat
+4. Wait for the message:
+Built DeadZone.exe
+5. Confirm that DeadZone.exe appears in the project folder.
+The build script uses the C# compiler included with the .NET Framework and references Windows Forms, Drawing and ServiceProcess. You do not need Visual Studio to run this supplied build script. If the compiler cannot be found, check that the .NET Framework compiler is present at one of the paths listed in Requirements.
+3. Install the Virtual Display Driver
+DeadZone needs a virtual monitor before mirroring can begin.
 
-VDD is a separate project and is **not bundled** with DeadZone. Official project and setup links:
+Option A — install the driver with WinGet
 
-- VDD project and current installation instructions: https://github.com/VirtualDrivers/Virtual-Display-Driver
-- VDD releases and Virtual Driver Control (VDC): https://github.com/VirtualDrivers/Virtual-Display-Driver/releases
-- VDD installation wiki: https://github.com/VirtualDrivers/Virtual-Display-Driver/wiki/Installation
+Open Terminal or Command Prompt and run:
+winget install --id=VirtualDrivers.Virtual-Display-Driver -e
+This installs the Virtual Display Driver package. It does not mean that the separate Virtual Driver Control application will necessarily appear in the Start menu.
 
-## 4. Build DeadZone.exe
+Option B — use Virtual Driver Control
+1. Open the Virtual Display Driver GitHub repository and its Releases page.
+2. Download the current Virtual Driver Control package linked by the project, or use the Virtual Driver Control repository and its Releases page.
+3. Extract the downloaded archive to a permanent folder.
+4. Run the Virtual Driver Control application from the extracted folder. It is a separate application; it may not be installed as a conventional Start-menu program.
+5. Use its driver controls to install the Virtual Display Driver if it is not already installed.
+The upstream driver project documents both the WinGet package and the separate control application. It also documents C:\VirtualDisplayDriver\vdd_settings.xml as the driver's settings file. Prefer the control application's display/resolution editor instead of manually editing the XML unless you understand the driver's configuration format. The upstream project also advises uninstalling VDD before major GPU/chipset driver updates, then reinstalling it afterward if needed.
+4. Check that the virtual display is available
+1. Open Device Manager and expand Display adapters to check that the virtual display driver is installed.
+2. Open Settings → System → Display.
+3. Confirm that Windows lists the laptop panel and the virtual monitor.
+4. In Virtual Driver Control, add/enable one virtual display if one is not already present.
+Do not select Disconnect this display for the laptop's physical panel. DeadZone needs that panel to remain connected so it can display the mirror.
+First-time setup
+Complete these steps in order.
+1. Set the laptop panel as the primary display
+Before the first DeadZone launch, open Settings → System → Display, select the built-in laptop panel, and enable Make this my main display. This matters because the first-run setup measures the current primary display as the physical panel.
+2. Mark the damaged area
+1. Double-click DeadZone.exe.
+2. A full-screen grid appears on the primary display, with a cyan vertical line.
+3. Drag the line to the boundary between the damaged strip and the working part of the panel.
+4. Use the Left Arrow and Right Arrow keys for one-pixel adjustments. Hold Shift while pressing an arrow key to move by 10 pixels.
+5. Press Enter to save the position. Press Esc to cancel.
+The setup screen shows the hidden width, its percentage of the panel, and the required virtual resolution. The virtual width is calculated as:
+virtual width = physical panel width - hidden strip width
+virtual height = physical panel height
+The current code restricts the cut to at least 16 pixels and leaves at least 400 pixels of usable width.
+3. Configure the virtual monitor to the exact resolution
+Use the resolution displayed by DeadZone. For example, if the setup window reports 1344 x 1080, configure the VDD virtual monitor to 1344 x 1080.
+1. Open Virtual Driver Control.
+2. Open its display/resolution settings.
+3. Add the exact width and height reported by DeadZone as a supported virtual display mode.
+4. Apply/save the VDD configuration.
+5. Open Settings → System → Display in Windows and select the virtual monitor.
+6. Set its display resolution to the exact DeadZone resolution.
+The virtual monitor's width and height must match DeadZone's calculated values exactly. If they do not match, DeadZone will remain in its waiting state rather than start mirroring.
+4. Make the virtual monitor the main display
+1. In Settings → System → Display, select the virtual monitor.
+2. Enable Make this my main display.
+3. Under Multiple displays, choose Extend these displays if Windows asks how to use the screens.
+4. Keep the physical laptop panel enabled and connected as an extended display. Do not duplicate the displays and do not disconnect the laptop panel.
+5. Arrange the monitor rectangles in Display Settings as needed for pointer movement. The virtual monitor must remain the primary display.
+5. Start mirroring
+1. Launch DeadZone.exe if it is not already running.
+2. Wait for the tray icon tooltip to report mirroring.
+3. The virtual desktop should now appear on the working part of the laptop panel, with the damaged strip covered.
+When setup is correct, the Windows desktop, taskbar and normal application windows are rendered by Windows on the smaller virtual monitor. The original laptop panel is used as the mirror surface.
+Using DeadZone
+DeadZone runs in the Windows notification area (system tray), near the clock. Right-click the DeadZone tray icon to access these commands:
+Menu item	Purpose
+Re-adjust line...	Reopen the setup grid and change the width of the hidden strip.
+Draw mouse cursor	Toggle DeadZone's cursor drawing. Turn this off if you see two cursors.
+Start with Windows	Add or remove DeadZone from the current user's Windows startup registry key.
+Exit	Stop mirroring, release the mouse, and close DeadZone.
 
-The ZIP contains `DeadZone.cs`, `DeadZone.csproj`, `build.bat` and `DisplayCheck.ps1`.
 
-1. Download `DeadZone-v3.1-Windows.zip` and extract the complete `DeadZone-v3.1` folder, for example to `Downloads` or `Documents`.
-2. Open the extracted folder. Confirm that `DeadZone.cs`, `DeadZone.csproj` and `build.bat` are in the same folder.
-3. Double-click `build.bat`.
-4. The builder first tries the .NET Framework C# compiler. If that is unavailable, it tries the .NET SDK.
-5. If prompted to install the Microsoft .NET 10 SDK using WinGet, enter `Y` only if you approve the installation. Alternatively, install the SDK yourself and run `build.bat` again.
-6. Wait for the message `BUILD SUCCEEDED`.
-7. The resulting `DeadZone.exe` should appear in the same `DeadZone-v3.1` folder.
-8. If the build fails, no new executable is produced. Send `build-csc-log.txt` or `build-dotnet-log.txt` (whichever contains the failure) when requesting help.
+The emergency hotkey is:
+Ctrl + Alt + Shift + X
+Use it to exit DeadZone and release its mouse clipping while you are signed in to the normal Windows desktop.
+Full-screen applications
+Because the virtual monitor is the primary Windows display, applications that use the normal Windows display path should see the smaller virtual resolution as the desktop display. Use the application's regular full-screen button on the virtual display rather than the old window-resizing workaround.
 
-Do not use an older `DeadZone.exe` from a previous folder as a replacement for the newly built executable. The v3.1 ZIP is a source/build package; it is not a precompiled v3.1 executable.
+DeadZone also checks every 300 ms for visible top-level application windows whose centre is on the physical laptop panel. It attempts to move those windows to the virtual monitor. This is a best-effort correction for applications that reopen on the wrong monitor; it is not a driver-level guarantee and may not work with every protected, elevated, exclusive-full-screen or unusual application window.
+Lock-screen helper service
+The optional service is intended to keep the mirror available on Windows' secure desktops, including the lock/sign-in screen and UAC prompts. It uses a Windows service named DeadZoneSvc to launch a helper process in the active console session. The helper watches the active input desktop and attempts to mirror the virtual monitor when Windows switches away from the normal Default desktop.
+[!WARNING]
+The service runs with SYSTEM-level privileges. Review DeadZone.cs, install_service.bat and uninstall_service.bat before installing it. The secure-desktop functionality is experimental and has not been confirmed on all Windows versions, graphics drivers or sign-in configurations. Do not rely on it as your only way to access the computer.
 
-## 5. Install and enable the Virtual Display Driver
-
-DeadZone cannot create the virtual monitor by itself. Install VDD separately.
-
-### Option A — WinGet
-
-1. Open Windows Terminal or PowerShell.
-2. Run:
-
-   ```powershell
-   winget install --id=VirtualDrivers.Virtual-Display-Driver -e
-   ```
-
-3. Follow the installer prompts.
-4. Download the separate **Virtual Driver Control (VDC)** application from the official VDD Releases page linked above.
-5. Extract and launch VDC. Use its **Install** control to install/enable the VDD driver, following the prompts in that version of VDC.
-6. Open Device Manager and Windows Settings > System > Display to confirm that Windows detects the virtual display.
-
-If Windows reports a missing `vcruntime140.dll`, install the current Microsoft Visual C++ Redistributable from Microsoft's official page: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
-
-### Option B — Official VDD installer
-
-Use the current installer supplied on the official VDD Releases page and follow its installation instructions. Avoid manual INF installation unless you are comfortable with Device Manager driver installation and the VDD project's manual-install guide.
-
-## 6. Choose the usable-area width
-
-You must save the damaged-left cut first, because DeadZone calculates the exact virtual display width from that cut.
-
-1. Keep the physical laptop LCD as the Windows main display while doing the initial setup if that makes the desktop easier to use.
-2. Run `DeadZone.exe`.
-3. A full-screen grid appears on the physical laptop LCD. Drag the cyan vertical line to the boundary where the undamaged pixels begin.
-4. Use the left/right arrow keys for one-pixel adjustments. Hold Shift while pressing an arrow key to move in larger increments.
-5. Press Enter to save. Press Esc to cancel.
-6. DeadZone saves the cut and original dimensions to:
-
-   `%APPDATA%\DeadZone\config.txt`
-
-7. After saving, read the exact required virtual resolution using the PowerShell command below.
-
-   ```powershell
-   $p = (Get-Content "$env:APPDATA\DeadZone\config.txt").Split(',')
-   [pscustomobject]@{
-       DamagedLeftPixels = [int]$p[0]
-       PhysicalWidth     = [int]$p[1]
-       PhysicalHeight    = [int]$p[2]
-       RequiredVDDWidth  = ([int]$p[1] - [int]$p[0])
-       RequiredVDDHeight = [int]$p[2]
-   } | Format-List
-   ```
-
-### Example only
-
-For a 1920 x 1080 physical panel with a 30% damaged-left strip:
-
-- Approximate cut: 576 pixels.
-- Required VDD mode: **1344 x 1080**.
-
-Use the exact values printed by the PowerShell command, not the example values. The cut can be different from exactly 30% depending on where the working pixels begin.
-
-## 7. Configure the VDD resolution
-
-1. Open VDC and locate the virtual display configuration for your installed VDD version.
-2. Add/enable a mode equal to the exact `RequiredVDDWidth x RequiredVDDHeight` calculated in Step 6. Keep the height equal to the physical panel height.
-3. If your VDC version does not expose custom resolution controls, consult the VDD project's current instructions for editing `C:\VirtualDisplayDriver\vdd_settings.xml`. The XML format and available options can vary by VDD release; do not paste an XML fragment from an unrelated version.
-4. Apply the change and restart/re-enable the virtual display or reboot if the VDD version requests it.
-5. Open **Settings > System > Display**. Select the virtual display and choose the required resolution under **Display resolution**.
-6. Select **Extend these displays**. Do not choose Duplicate.
-7. At this stage, verify that the virtual display really runs at the required width and the full physical-panel height.
-
-**Important:** Your earlier diagnostic showed a virtual display at **800 x 600**. That is not the expected mode for a 1920 x 1080 panel with a 30% cut. DeadZone will continue showing `waiting for virtual display 1344x1080` (or the dimensions from your saved configuration) until VDD exposes and Windows selects the exact required mode.
-
-## 8. Set the virtual monitor as the main display
-
-Do this only after the VDD monitor is running at the exact required resolution.
-
-1. Open **Settings > System > Display**.
-2. Click the virtual display in the monitor diagram. Use **Identify** if you are unsure which rectangle it is.
-3. Expand **Multiple displays** if necessary.
-4. Enable **Make this my main display** for the virtual display.
-5. Keep the physical laptop LCD enabled as an extended display. Do not disconnect or disable it.
-6. Leave the display arrangement in **Extend these displays** mode.
-
-The Windows taskbar and Start menu will belong to the virtual primary monitor. Once DeadZone successfully mirrors the virtual desktop, those UI elements should appear in the working part of the laptop LCD. Before mirroring starts, the taskbar may be visible only on the small virtual monitor, which can make setup inconvenient.
-
-## 9. Start DeadZone and verify mirroring
-
-1. Run the newly built `DeadZone.exe`.
-2. Look in the notification area beside the clock. If necessary, click the `^` hidden-icons arrow to find the DeadZone icon.
-3. Hover over the icon to read its status.
-4. The expected working status is:
-
-   `mirroring - fullscreen windows redirected`
-
-5. The damaged-left section should be black, and the virtual desktop should appear on the remaining right-hand portion of the physical LCD.
-6. Test with ordinary windows first, then a browser/video player using borderless fullscreen.
-7. If the cursor appears twice, right-click the DeadZone tray icon and turn off **Draw mouse cursor**.
-
-## 10. Tray menu and keyboard controls
-
-Right-click the DeadZone notification-area icon for these options:
-
-- **Re-adjust line...** — choose a new damaged-left boundary. If the usable width changes, update the VDD resolution to match the new calculated size and restart DeadZone.
-- **Show setup instructions...** — reopens the setup summary.
-- **Draw mouse cursor** — turns DeadZone's cursor drawing on or off if the cursor appears duplicated.
-- **Start with Windows** — toggles automatic startup.
-- **Exit** — stops mirroring and releases the mouse restriction.
-
-Emergency exit: press **Ctrl + Alt + Shift + X**. This stops DeadZone, hides its cover window and releases cursor clipping.
-
-## 11. Your current 800 x 600 / taskbar issue
-
-The diagnostic output you shared showed:
-
-```text
-DISPLAY1  Primary=False  1920 x 1080
-DISPLAY6  Primary=True    800 x 600
-```
-
-This means Windows currently has a 1920 x 1080 secondary display and an 800 x 600 primary display. The output alone does not prove which display is the VDD monitor, but it is consistent with VDD being selected at 800 x 600. DeadZone needs a virtual display matching the width and height saved in `config.txt`.
-
-To check the expected size:
-
-1. Open PowerShell in the extracted DeadZone folder.
-2. Run the configuration command in Step 6.
-3. Compare `RequiredVDDWidth` and `RequiredVDDHeight` with the virtual display shown in Settings > System > Display.
-4. Change the VDD mode to that exact resolution before making it the main display.
-5. Run the diagnostic script from the extracted folder:
-
-   ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\DisplayCheck.ps1"
-   ```
-
-   The VDD display should report the exact required dimensions and `Primary=True`; the physical LCD should remain enabled at its native dimensions.
-
-If the taskbar is difficult to reach while the virtual monitor is primary, temporarily open Display Settings with **Win + R**, enter `ms-settings:display`, and set the physical laptop LCD as the main display while you correct the VDD resolution. Once the VDD mode is correct, set VDD as the main display again and restart DeadZone.
-
-## 12. Status messages and troubleshooting
-
-| Tray status | Meaning / action |
-|---|---|
-| `waiting for virtual display WIDTHxHEIGHT` | Windows does not currently expose a monitor with the exact required dimensions. Add/select the correct VDD mode. |
-| `make virtual display the main display` | The correctly sized virtual monitor exists, but Windows has not marked it as the primary display. |
-| `starting...` | DeadZone is trying to initialize DXGI/D3D capture. Give it a short moment. |
-| `mirror error - ...` | Capture initialization failed. Record the complete status text, check GPU drivers and confirm the VDD monitor is active. |
-| `mirroring - fullscreen windows redirected` | The mirror is running. Test a normal window and a borderless-fullscreen application. |
-
-If the display becomes confusing, use the DeadZone emergency hotkey first. You can also close DeadZone from its tray menu if available. Then open **Settings > System > Display**, select the physical laptop LCD and make it the main display. Do not uninstall or disable the physical laptop panel.
-
-If Windows becomes unusable after a VDD driver installation or update, follow the VDD project's current recovery instructions. The VDD project documents Safe Mode removal as a recovery option for cases where display priority is scrambled or Windows boots to a black screen. Do not remove your laptop's Intel/AMD/NVIDIA graphics driver as a troubleshooting shortcut.
-
-## 13. Known limitations and safety notes
-
-- The utility has not been validated on every laptop or GPU model. Test cautiously.
-- A virtual display driver changes the Windows display topology. Keep the VDD installer/release information available and know how to restore the physical LCD as the main display.
-- Exclusive fullscreen games may still use the physical panel; select borderless/windowed fullscreen in those applications.
-- The protected Windows lock/sign-in screen is not mirrored.
-- Screen capture may pause or reset during secure desktop transitions, display sleep, driver reset or GPU changes.
-- Do not install display-driver updates from unknown sites. Follow the laptop/GPU manufacturer's instructions.
-- The VDD project advises uninstalling VDD before major GPU/chipset driver updates and reinstalling it afterward if required by its current release notes.
-
-## 14. Uninstall / restore normal display use
-
-1. Press **Ctrl + Alt + Shift + X** or right-click the DeadZone tray icon and select **Exit**.
-2. Open **Settings > System > Display**.
-3. Select the physical laptop LCD and enable **Make this my main display**.
-4. Keep or disconnect the virtual display as desired. If you no longer need VDD, uninstall it through VDC or the Windows app/uninstaller provided by the VDD release.
-5. To stop DeadZone from launching automatically, use the DeadZone tray menu > **Start with Windows** to turn it off before exiting.
-6. Optional: delete `%APPDATA%\DeadZone\` to remove the saved cut configuration. This does not uninstall VDD.
-
----
-
-DeadZone is an experimental utility provided without warranty. It is not affiliated with the Virtual Display Driver project. Use the official VDD links above for driver installation, release notes and driver-specific configuration details.
+Install the service
+First confirm that ordinary desktop mirroring works. Then:
+1. Keep the project in a permanent folder such as C:\DeadZone.
+2. Confirm that DeadZone.exe is in the same folder as install_service.bat.
+3. Double-click install_service.bat.
+4. Approve the Windows administrator prompt. The script attempts to elevate itself if it is not already running as administrator.
+5. Confirm that the script reports completion.
+6. Press Win + L to test the lock screen.
+The service is configured for automatic startup. Do not move, rename or delete DeadZone.exe after installing the service. The service's executable path points to that file.
+Remove the service
+1. Sign in to Windows.
+2. Run uninstall_service.bat.
+3. Approve the administrator prompt.
+4. Confirm that the DeadZoneSvc service is stopped and removed.
+If the lock screen remains black, do not assume the service is working. Sign back in, run the uninstaller, and use the troubleshooting steps below. Secure-desktop capture can behave differently across Windows builds and graphics drivers.
+Performance and limitations
+Performance design
+- Desktop frames are captured using DXGI Desktop Duplication. The capture call waits for a frame change with a timeout instead of continuously taking screenshots in a tight loop.
+- Frames are copied with Direct3D 11 rather than being processed as ordinary CPU bitmaps.
+- The window-placement check runs every 300 ms; the main display/status check runs every second.
+- The presenter is configured for a 60 Hz swap chain.
+This design is intended to avoid the high-frequency fullscreen-window resizing loop used by earlier prototypes. Actual CPU/GPU usage, latency, temperature and battery impact depend on the laptop, GPU, panel refresh rate and driver. No performance benchmark is currently available, so low overhead is a design goal, not a measured guarantee.
+Current limitations
+- Not a physical panel repair: DeadZone cannot restore damaged LCD pixels or change the laptop panel's native hardware resolution.
+- Requires a virtual display driver: Windows must have a working VDD virtual monitor with the exact calculated resolution.
+- One-panel setup: the current code is designed around one physical laptop panel and one virtual monitor. Extra displays, or other displays sharing the same dimensions, may confuse its dimension-based display detection.
+- Primary display required: the virtual monitor must be the Windows primary display for normal desktop use.
+- Physical panel must stay connected: DeadZone needs it as the mirror target. Do not disable or disconnect it in Display Settings.
+- Window relocation is best-effort: unusual windows, protected processes, elevated applications and exclusive-full-screen software may not be moved successfully.
+- Secure desktop support is experimental: lock screen, sign-in and UAC mirroring depends on the service/helper and Windows desktop behavior. It is not guaranteed.
+- Boot and firmware screens are not covered: the Windows program and driver cannot mirror the BIOS/UEFI setup screen or early boot screens before Windows and its services start.
+- Refresh rate: the current mirror swap chain is configured at 60 Hz. Other refresh rates have not been validated.
+- No multi-monitor workflow guarantee: the current display matching logic identifies screens by width and height, not by a unique hardware display identifier.
+Troubleshooting
+DeadZone says waiting for virtual display ...
+- Confirm that the Virtual Display Driver is installed and enabled.
+- Confirm that a virtual monitor exists in Windows Display Settings.
+- Confirm that its resolution exactly matches the width and height shown by DeadZone.
+- Confirm that the laptop panel remains connected and has its original resolution.
+- Avoid using another display with the same dimensions while troubleshooting.
+DeadZone says make the virtual display your MAIN display
+Open Settings → System → Display, select the virtual monitor, and enable Make this my main display. The physical panel must remain connected but must not be the primary display.
+The Virtual Driver Control app is missing
+Installing the driver with WinGet does not guarantee that the separate control application is installed as a Start-menu app. Download the control application from the Virtual Driver Control releases, extract it, and run it from the extracted folder. See the Virtual Display Driver project for its current installation instructions.
+DeadZone.exe is not created
+- Confirm that the source file is named DeadZone.cs, not DeadZone(2).cs.
+- Confirm that the build script is named build.bat.
+- Open Command Prompt in the project folder and run build.bat again.
+- Check whether csc.exe exists in one of the .NET Framework paths listed under Requirements.
+- Read the compiler error printed above Build failed..
+The laptop panel goes black or the display arrangement becomes unusable
+- While signed in, try Ctrl + Alt + Shift + X to close DeadZone and release the mouse.
+- If Windows is still visible on another monitor, use Display Settings to make the laptop panel the main display and disable/remove the virtual display.
+- If a driver-related black screen or display-priority problem prevents normal access, use Windows Safe Mode to remove or disable the Virtual Display Driver. The VDD project also recommends Safe Mode recovery for driver/display problems.
+- Keep another display or a Windows recovery route available before experimenting with display drivers.
+The emergency hotkey is handled by the normal DeadZone process; it may not be available on the secure lock/sign-in desktop.
+Two mouse cursors appear
+Right-click the DeadZone tray icon and clear Draw mouse cursor. Some virtual-display configurations already provide a hardware cursor, so the extra cursor overlay may not be needed.
+Applications still open on the laptop panel
+- Wait briefly for the 300 ms window-placement check.
+- Confirm that the virtual monitor is the primary display.
+- Try restoring and reopening the application after changing the primary display.
+- Some applications explicitly select a monitor or use exclusive-full-screen modes and may not be relocatable by this user-mode window check.
+The lock screen is still black
+- First verify that normal desktop mirroring works.
+- Confirm that DeadZoneSvc is installed and running in Windows Services (services.msc).
+- Sign back in and review the service installation output.
+- Run uninstall_service.bat to remove the experimental service if it does not work reliably.
+DeadZone causes lag or flicker
+The current design does not continuously resize full-screen application windows. If lag occurs, check GPU driver health, confirm that the virtual display is running at the expected resolution, and test without other screen-capture/overlay software. The 300 ms window check can still have a cost on systems with many windows; performance has not yet been benchmarked.
+Updating DeadZone
+If you installed the optional service:
+1. Run uninstall_service.bat as administrator.
+2. Exit DeadZone from the tray or press Ctrl + Alt + Shift + X.
+3. Replace the source/scripts with the new repository versions, keeping the required file names.
+4. Run build.bat again.
+5. Launch the newly built DeadZone.exe and confirm that desktop mirroring works.
+6. Run install_service.bat again only if you still want the lock-screen helper.
+Your normal user configuration is stored separately, so rebuilding the executable should not normally reset the saved cut position.
+Uninstalling
+1. Run uninstall_service.bat as administrator if the service was installed.
+2. Exit DeadZone using the tray menu or Ctrl + Alt + Shift + X.
+3. Open Settings → System → Display and set the laptop's physical panel as the main display.
+4. In Virtual Driver Control, remove/disable the virtual monitor and uninstall the Virtual Display Driver if you no longer need it. Follow the driver's current uninstall instructions.
+5. In DeadZone's tray menu, turn off Start with Windows if it is enabled.
+6. Delete the DeadZone project folder after the service has been removed.
+7. To remove saved settings as well, delete these folders if they exist:
+%APPDATA%\DeadZone
+%PROGRAMDATA%\DeadZone
+How configuration is stored
+DeadZone stores the cut width and original panel dimensions as comma-separated values:
+cutPixels,panelWidth,panelHeight
+The configuration is written to two locations:
+- Current user configuration: %APPDATA%\DeadZone\config.txt
+- Shared configuration for the SYSTEM helper: %PROGRAMDATA%\DeadZone\config.txt
+The current-user startup option is stored in the Windows registry at:
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+The service name is DeadZoneSvc.
+Credits and related projects
+DeadZone depends on the following separate project:
+- Virtual Display Driver — VirtualDrivers
+- Virtual Driver Control — VirtualDrivers
+Please review their documentation, licenses and release notes before installing or redistributing their driver or control software. DeadZone's source code and batch files should be accompanied by an explicit project license before public redistribution; do not assume that a dependency's license automatically applies to DeadZone.
+Project status: experimental / testing required on real Windows hardware.
